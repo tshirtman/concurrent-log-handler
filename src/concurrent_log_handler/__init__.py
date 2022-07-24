@@ -65,6 +65,7 @@ import warnings
 from contextlib import contextmanager
 from logging.handlers import BaseRotatingHandler, TimedRotatingFileHandler
 
+# noinspection PyPackageRequirements
 from portalocker import LOCK_EX, lock, unlock
 from concurrent_log_handler.__version__ import __author__, __version__
 
@@ -103,9 +104,7 @@ if sys.version_info[0] == 2:
     PY2 = True
 
 
-
-
-class ConcurrentFileHandlerMixin:
+class ConcurrentFileHandlerMixin(BaseRotatingHandler):
     """
     Handler for logging to a set of files, which switches from one file to the
     next when the current file reaches a certain size. Multiple processes can
@@ -114,10 +113,10 @@ class ConcurrentFileHandlerMixin:
     """
 
     def __init__(
-            self, filename, mode='a', maxBytes=0, backupCount=0,
-            encoding=None, debug=False, delay=None, use_gzip=False,
-            owner=None, chmod=None, umask=None, newline=None, terminator="\n",
-            unicode_error_policy='ignore',
+        self, filename, mode='a', maxBytes=0, backupCount=0,
+        encoding=None, debug=False, delay=None, use_gzip=False,
+        owner=None, chmod=None, umask=None, newline=None, terminator="\n",
+        unicode_error_policy='ignore',
     ):
         """
         Open the specified file and use it as the stream for logging.
@@ -329,6 +328,7 @@ class ConcurrentFileHandlerMixin:
                 self._do_lock()
 
                 try:
+                    # noinspection PyUnresolvedReferences
                     if self.shouldRollover(record):
                         self.doRollover()
                 except Exception as e:
@@ -402,7 +402,7 @@ class ConcurrentFileHandlerMixin:
 
     def _do_lock(self):
         if self.is_locked:
-            return   # already locked... recursive?
+            return  # already locked... recursive?
         self._open_lockfile()
         if self.stream_lock:
             for i in range(self.maxLockAttempts):
@@ -521,18 +521,6 @@ class ConcurrentFileHandlerMixin:
 
         self._console_log("Rotation completed")
 
-    # noinspection PyUnusedLocal
-    def shouldRollover(self, record):
-        """
-        Determine if rollover should occur.
-
-        For those that are keeping track. This differs from the standard
-        library's RotatingLogHandler class. Because there is no promise to keep
-        the file size under maxBytes we ignore the length of the current record.
-        """
-        del record  # avoid pychecker warnings
-        return self._shouldRollover()
-
     def do_gzip(self, input_filename):
         if not gzip:
             self._console_log("#no gzip available", stack=False)
@@ -559,7 +547,21 @@ class ConcurrentFileHandlerMixin:
             os.chmod(filename, self.chmod)
 
 
-class ConcurrentRotatingFileHandler(BaseRotatingHandler, ConcurrentFileHandlerMixin):
+class ConcurrentRotatingFileHandler(ConcurrentFileHandlerMixin):
+    """This is the main size-based-rotation concurrent log handler class.
+    See main comments in ConcurrentFileHandlerMixin"""
+    # noinspection PyUnusedLocal
+    def shouldRollover(self, record):
+        """
+        Determine if rollover should occur.
+
+        For those that are keeping track. This differs from the standard
+        library's RotatingLogHandler class. Because there is no promise to keep
+        the file size under maxBytes we ignore the length of the current record.
+        """
+        del record  # avoid pychecker warnings
+        return self._shouldRollover()
+
     def _shouldRollover(self):
         if self.maxBytes > 0:  # are we rolling over?
             self.stream = self.do_open()
@@ -573,10 +575,28 @@ class ConcurrentRotatingFileHandler(BaseRotatingHandler, ConcurrentFileHandlerMi
 
 
 class ConcurrentTimedRotatingFileHandler(TimedRotatingFileHandler, ConcurrentFileHandlerMixin):
-    pass
+    """A concurrent log handler that does time-based-rotation instead of size-based.
+    See the docs for TimedRotatingFileHandler."""
+    def __init__(
+        self, filename, when='h', interval=1, backupCount=0,
+        encoding=None, delay=False, utc=False, atTime=None,
+        errors=None, mode='a', debug=False, use_gzip=False,
+        owner=None, chmod=None, umask=None, newline=None, terminator="\n",
+        unicode_error_policy='ignore'
+    ):
+        TimedRotatingFileHandler.__init__(
+            self, filename, when=when, interval=interval, backupCount=backupCount,
+            encoding=encoding, delay=delay, utc=utc, atTime=atTime, errors=errors
+        )
+        ConcurrentFileHandlerMixin.__init__(
+            self, filename, mode=mode, backupCount=backupCount,
+            encoding=encoding, debug=debug, delay=delay, use_gzip=use_gzip,
+            owner=owner, chmod=chmod, umask=umask, newline=newline, terminator=terminator,
+            unicode_error_policy=unicode_error_policy,
+        )
 
 
-# Publish this class to the "logging.handlers" module so that it can be use
+# Publish this class to the "logging.handlers" module so that it can be used
 # from a logging config file via logging.config.fileConfig().
 import logging.handlers
 
